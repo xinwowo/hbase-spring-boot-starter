@@ -1,21 +1,5 @@
 package com.xww.hbase.spring.boot.starter.core;
 
-import com.alibaba.fastjson.JSONObject;
-import com.xww.hbase.spring.boot.starter.annotation.RowType;
-import com.xww.hbase.spring.boot.starter.mapping.RowMapping;
-import com.xww.hbase.spring.boot.starter.mapping.TableMapping;
-import com.xww.hbase.spring.boot.starter.mapping.TableMappingContext;
-import com.xww.hbase.spring.boot.starter.util.DateUtils;
-import com.xww.hbase.spring.boot.starter.util.JsonUtils;
-import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang.StringUtils;
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hbase.TableName;
-import org.apache.hadoop.hbase.client.*;
-import org.apache.hadoop.hbase.util.Bytes;
-import org.springframework.util.Assert;
-import org.springframework.util.StopWatch;
-
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
@@ -25,6 +9,34 @@ import java.util.List;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+
+import com.alibaba.fastjson.JSONObject;
+import com.xww.hbase.spring.boot.starter.annotation.RowType;
+import com.xww.hbase.spring.boot.starter.mapping.RowMapping;
+import com.xww.hbase.spring.boot.starter.mapping.TableMapping;
+import com.xww.hbase.spring.boot.starter.mapping.TableMappingContext;
+import com.xww.hbase.spring.boot.starter.util.DateUtils;
+import com.xww.hbase.spring.boot.starter.util.JsonUtils;
+
+import org.apache.commons.lang.StringUtils;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hbase.TableName;
+import org.apache.hadoop.hbase.client.BufferedMutator;
+import org.apache.hadoop.hbase.client.BufferedMutatorParams;
+import org.apache.hadoop.hbase.client.Connection;
+import org.apache.hadoop.hbase.client.ConnectionFactory;
+import org.apache.hadoop.hbase.client.Get;
+import org.apache.hadoop.hbase.client.Mutation;
+import org.apache.hadoop.hbase.client.Put;
+import org.apache.hadoop.hbase.client.Result;
+import org.apache.hadoop.hbase.client.ResultScanner;
+import org.apache.hadoop.hbase.client.Scan;
+import org.apache.hadoop.hbase.client.Table;
+import org.apache.hadoop.hbase.util.Bytes;
+import org.springframework.util.Assert;
+import org.springframework.util.StopWatch;
+
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * @author xin.zhou [xinwowo@hotmail.com]
@@ -114,6 +126,27 @@ public class HbaseTemplate implements HbaseOperations {
     }
 
     @Override
+    public <T> List<T> find(List<Get> gets, Class<T> clazz) {
+        TableMapping tableMapping = tableMappingContext.getTableMapping(clazz);
+        return this.execute(tableMapping.getNamespace() + ":" + tableMapping.getTableName(), table -> {
+            Result[] scanner = table.get(gets);
+            List<T> rs = new ArrayList<>();
+            for (Result result : scanner) {
+                rs.add(getRow(result, tableMapping.getRowMappingList(), clazz));
+            }
+            return rs;
+        });
+    }
+
+    @Override
+    public <T> T get(Get get, Class<T> clazz) {
+        TableMapping tableMapping = tableMappingContext.getTableMapping(clazz);
+        return this.execute(tableMapping.getNamespace() + ":" + tableMapping.getTableName(), table -> {
+            return getRow(table.get(get), tableMapping.getRowMappingList(), clazz);
+        });
+    }
+
+    @Override
     public <T> T get(String rowName, Class<T> clazz) {
         return this.get(rowName, null, null, clazz);
     }
@@ -143,7 +176,8 @@ public class HbaseTemplate implements HbaseOperations {
     private <T> T getRow(Result result, List<RowMapping> rowMappingList, Class<T> clazz) {
         JSONObject jsonObject = new JSONObject();
         for (RowMapping rowMapping : rowMappingList) {
-            byte[] columnValueBytes = result.getValue(Bytes.toBytes(rowMapping.getColumnFamily()), Bytes.toBytes(rowMapping.getColumnName()));
+            byte[] columnValueBytes = result.getValue(Bytes.toBytes(rowMapping.getColumnFamily()),
+                    Bytes.toBytes(rowMapping.getColumnName()));
             if (columnValueBytes == null) {
                 continue;
             }
@@ -175,7 +209,8 @@ public class HbaseTemplate implements HbaseOperations {
                     jsonObject.put(columnName, Bytes.toBigDecimal(columnValueBytes));
                     break;
                 case Date:
-                    jsonObject.put(columnName, DateUtils.stringToDate(Bytes.toString(columnValueBytes), DateUtils.Format_1));
+                    jsonObject.put(columnName,
+                            DateUtils.stringToDate(Bytes.toString(columnValueBytes), DateUtils.Format_1));
                     break;
                 default:
                     log.error("Unsupported data types:" + columnType);
@@ -312,7 +347,8 @@ public class HbaseTemplate implements HbaseOperations {
                         put.addColumn(columnFamily, columnName, Bytes.toBytes((BigDecimal) field.get(t)));
                         break;
                     case Date:
-                        put.addColumn(columnFamily, columnName, Bytes.toBytes(DateUtils.dateToString((Date) field.get(t), DateUtils.Format_1)));
+                        put.addColumn(columnFamily, columnName,
+                                Bytes.toBytes(DateUtils.dateToString((Date) field.get(t), DateUtils.Format_1)));
                         break;
                     default:
                         log.error("Unsupported data types:" + columnType);
@@ -340,7 +376,8 @@ public class HbaseTemplate implements HbaseOperations {
             synchronized (this) {
                 if (null == this.connection) {
                     try {
-                        ThreadPoolExecutor poolExecutor = new ThreadPoolExecutor(200, Integer.MAX_VALUE, 60L, TimeUnit.SECONDS, new SynchronousQueue<Runnable>());
+                        ThreadPoolExecutor poolExecutor = new ThreadPoolExecutor(200, Integer.MAX_VALUE, 60L,
+                                TimeUnit.SECONDS, new SynchronousQueue<Runnable>());
                         // init pool
                         poolExecutor.prestartCoreThread();
                         this.connection = ConnectionFactory.createConnection(configuration, poolExecutor);

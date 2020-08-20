@@ -1,8 +1,9 @@
 package com.xww.hbase.spring.boot.starter.core;
 
-import org.apache.hadoop.hbase.client.Scan;
-
 import java.util.List;
+
+import org.apache.hadoop.hbase.client.Get;
+import org.apache.hadoop.hbase.client.Scan;
 
 /**
  * @author xin.zhou [xinwowo@hotmail.com]
@@ -28,6 +29,10 @@ public interface HbaseOperations {
     <T> List<T> find(String family, String qualifier, Class<T> clazz);
 
     <T> List<T> find(Scan scan, Class<T> clazz);
+
+    <T> List<T> find(List<Get> gets, Class<T> clazz);
+
+    <T> T get(Get get, Class<T> clazz);
 
     <T> T get(String rowName, Class<T> clazz);
 
